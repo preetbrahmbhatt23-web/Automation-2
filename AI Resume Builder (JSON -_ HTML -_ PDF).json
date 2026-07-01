@@ -1,0 +1,242 @@
+{
+  "name": "AI Resume Builder (JSON -> HTML -> PDF)",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=JOB DESCRIPTION:\n{{ $json['job Description'] }}\n\nCANDIDATE PROFILE:\n{{ $json['current Resume'] }}\n\nCANDIDATE EMAIL: {{ $json.email }}",
+        "options": {
+          "systemMessage": "You are an expert resume writer. Read the JOB DESCRIPTION and the CANDIDATE PROFILE (their existing resume). Produce a single tailored resume as a JSON object ONLY — no markdown, no code fences, no commentary, no preamble. The response MUST start with { and end with }.\n\nExtract the EXACT job title mentioned in the JOB DESCRIPTION and use it as jobTitle.\n\nReturn JSON matching exactly this schema:\n{\n  \"name\": string,\n  \"phone\": string,\n  \"email\": string,\n  \"location\": string,\n  \"jobTitle\": string,\n  \"competencies\": [string] (exactly 6 short core competencies relevant to the JD),\n  \"skills\": [string] (8 to 12 technical/professional skills),\n  \"tools\": [string] (5 to 8 tools/technologies),\n  \"languages\": string (spoken languages, comma separated),\n  \"strengths\": [string] (4 to 5 soft-skill strengths),\n  \"education\": [{ \"degree\": string, \"institution\": string, \"year\": string }],\n  \"summary\": string (4 to 5 sentence professional summary tailored to the JD),\n  \"experience\": [{ \"title\": string, \"company\": string, \"start\": string, \"end\": string, \"bullets\": [string] (5 to 7 achievement bullets) }],\n  \"achievements\": [string] (3 to 5 key achievements),\n  \"objective\": string (2 sentence career objective)\n}\n\nENRICHMENT RULES:\n- Infer relevant skills/tools from the JOB DESCRIPTION only when reasonably implied by the candidate's existing background.\n- Reframe the candidate's existing experience using JOB DESCRIPTION keywords and terminology.\n- Never invent metrics, numbers, percentages, company names, job titles, dates, degrees, or certifications that are not present in the CANDIDATE PROFILE.\n- When in doubt, paraphrase and expand on real facts — never fabricate facts.\n- Keep the tone professional and concise, optimized for ATS keyword matching.\n- Return ONLY the JSON object, nothing else.",
+          "maxIterations": 2
+        }
+      },
+      "id": "42c9582a-f2f8-46f6-bec4-7d40078db779",
+      "name": "Generate Resume JSON",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        224,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "id": "2cf484ea-25fe-4042-aaf7-64c2bbc4bc81",
+      "name": "Groq Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        304,
+        336
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "ZyDQdhqKDEHDoYbe",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build HTML node - parses AI JSON output and builds a fixed-layout A4 resume HTML\nconst raw = $input.first().json.output || $input.first().json.text || '';\n\nlet cleaned = String(raw).trim();\ncleaned = cleaned.replace(/^```json\\s*/i, '').replace(/^```\\s*/i, '').replace(/```\\s*$/i, '').trim();\n\nlet data;\ntry {\n  data = JSON.parse(cleaned);\n} catch (e) {\n  throw new Error('AI did not return valid JSON. Raw output: ' + cleaned.slice(0, 500));\n}\n\nconst esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst list = (arr) => Array.isArray(arr) ? arr : [];\n\nconst competencies = list(data.competencies).map(c => `<span class=\"chip\">${esc(c)}</span>`).join('');\nconst skills = list(data.skills).map(s => `<li>${esc(s)}</li>`).join('');\nconst tools = list(data.tools).map(t => `<li>${esc(t)}</li>`).join('');\nconst strengths = list(data.strengths).map(s => `<li>${esc(s)}</li>`).join('');\nconst achievements = list(data.achievements).map(a => `<li>${esc(a)}</li>`).join('');\n\nconst education = list(data.education).map(ed => `\n  <div class=\"edu-item\">\n    <div class=\"edu-degree\">${esc(ed.degree)}</div>\n    <div class=\"edu-meta\">${esc(ed.institution)} ${ed.year ? '&middot; ' + esc(ed.year) : ''}</div>\n  </div>`).join('');\n\nconst experience = list(data.experience).map(job => `\n  <div class=\"job\">\n    <div class=\"job-header\">\n      <span class=\"job-title\">${esc(job.title)}</span>\n      <span class=\"job-dates\">${esc(job.start)} - ${esc(job.end)}</span>\n    </div>\n    <div class=\"job-company\">${esc(job.company)}</div>\n    <ul class=\"job-bullets\">\n      ${list(job.bullets).map(b => `<li>${esc(b)}</li>`).join('')}\n    </ul>\n  </div>`).join('');\n\nconst html = `<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"UTF-8\">\n<style>\n  @page { size: A4; margin: 0; }\n  * { box-sizing: border-box; margin: 0; padding: 0; }\n  body { font-family: 'Helvetica Neue', Arial, sans-serif; color: #222; width: 210mm; min-height: 296mm; display: flex; }\n  .sidebar { width: 72mm; background: #1a2e4a; color: #fff; padding: 12mm 8mm; display: flex; flex-direction: column; min-height: 296mm; }\n  .main { flex: 1; padding: 12mm 10mm; display: flex; flex-direction: column; min-height: 296mm; }\n  .name { font-size: 20pt; font-weight: 700; letter-spacing: 0.5px; line-height: 1.2; }\n  .job-title-header { font-size: 11pt; color: #2980b9; font-weight: 600; margin-top: 3mm; margin-bottom: 8mm; }\n  .sidebar h3, .main h3 { font-size: 10pt; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 3mm; }\n  .sidebar h3 { color: #2980b9; border-bottom: 1px solid rgba(255,255,255,0.25); padding-bottom: 1.5mm; }\n  .main h3 { color: #1a2e4a; border-bottom: 2px solid #2980b9; padding-bottom: 1.5mm; }\n  .sidebar-section { margin-bottom: 7mm; font-size: 9pt; }\n  .sidebar-section ul { list-style: none; }\n  .sidebar-section li { margin-bottom: 1.8mm; line-height: 1.4; }\n  .contact-item { margin-bottom: 1.8mm; font-size: 8.5pt; word-break: break-word; }\n  .main-section { margin-bottom: 6mm; }\n  .summary { font-size: 9.5pt; line-height: 1.55; text-align: justify; }\n  .chip { display: inline-block; background: #eaf1f8; color: #1a2e4a; font-size: 8pt; padding: 1mm 2.5mm; margin: 0 1.5mm 1.5mm 0; border-radius: 3mm; }\n  .job { margin-bottom: 5mm; }\n  .job-header { display: flex; justify-content: space-between; align-items: baseline; }\n  .job-title { font-size: 10.5pt; font-weight: 700; color: #1a2e4a; }\n  .job-dates { font-size: 8.5pt; color: #555; }\n  .job-company { font-size: 9.5pt; font-weight: 600; color: #2980b9; margin-bottom: 1.5mm; }\n  .job-bullets { padding-left: 4mm; font-size: 9pt; line-height: 1.5; }\n  .job-bullets li { margin-bottom: 1mm; }\n  .edu-item { margin-bottom: 3mm; font-size: 9pt; }\n  .edu-degree { font-weight: 600; }\n  .edu-meta { color: #555; font-size: 8.5pt; }\n  .achv-list { padding-left: 4mm; font-size: 9pt; line-height: 1.5; }\n  .fill { flex-grow: 1; }\n</style>\n</head>\n<body>\n  <div class=\"sidebar\">\n    <div class=\"sidebar-section\">\n      <h3>Contact</h3>\n      <div class=\"contact-item\">${esc(data.phone)}</div>\n      <div class=\"contact-item\">${esc(data.email)}</div>\n      <div class=\"contact-item\">${esc(data.location)}</div>\n    </div>\n    <div class=\"sidebar-section\">\n      <h3>Core Competencies</h3>\n      <div>${competencies}</div>\n    </div>\n    <div class=\"sidebar-section\">\n      <h3>Skills</h3>\n      <ul>${skills}</ul>\n    </div>\n    <div class=\"sidebar-section\">\n      <h3>Tools</h3>\n      <ul>${tools}</ul>\n    </div>\n    <div class=\"sidebar-section\">\n      <h3>Languages</h3>\n      <div class=\"contact-item\">${esc(data.languages)}</div>\n    </div>\n    <div class=\"sidebar-section\">\n      <h3>Strengths</h3>\n      <ul>${strengths}</ul>\n    </div>\n    <div class=\"fill\"></div>\n  </div>\n  <div class=\"main\">\n    <div class=\"name\">${esc(data.name)}</div>\n    <div class=\"job-title-header\">${esc(data.jobTitle)}</div>\n    <div class=\"main-section\">\n      <h3>Summary</h3>\n      <p class=\"summary\">${esc(data.summary)}</p>\n    </div>\n    <div class=\"main-section\">\n      <h3>Experience</h3>\n      ${experience}\n    </div>\n    <div class=\"main-section\">\n      <h3>Education</h3>\n      ${education}\n    </div>\n    <div class=\"main-section\">\n      <h3>Key Achievements</h3>\n      <ul class=\"achv-list\">${achievements}</ul>\n    </div>\n    <div class=\"fill\"></div>\n  </div>\n</body>\n</html>`;\n\nreturn [{ json: { html } }];\n"
+      },
+      "id": "8bfc4ada-54da-445b-894c-f0fc8128f428",
+      "name": "Build HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.pdfshift.io/v3/convert/pdf",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "sk_a07a317f55ffc187440292e254dd18b51c1ca3fe"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "source",
+              "value": "={{ $json.html }}"
+            },
+            {
+              "name": "landscape",
+              "value": "false"
+            },
+            {
+              "name": "use_print",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "a5f62b23-9b62-432e-a475-d48f68f84be9",
+      "name": "Convert to PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Resume Builder Form').item.json.email }}",
+        "subject": "Your Tailored Resume is Ready!",
+        "message": "<p>Hi,</p><p>Your tailored resume has been generated. Please find the PDF attached.</p><p>Good luck with your application!</p>",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [
+              {}
+            ]
+          }
+        }
+      },
+      "id": "32f612aa-8e9c-45e9-9ab7-c828588eef99",
+      "name": "Send a message",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1024,
+        112
+      ],
+      "webhookId": "35e385b9-7d19-4efb-b0c0-73ef1f945e0c",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "UZEUEBo5duTBr9qk",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "formTitle": "AI Resume Builder",
+        "formDescription": "Paste job description and your resume below to get a tailored PDF.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Job Description",
+              "fieldName": "job Description",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Your Current Resume",
+              "fieldName": "current Resume",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Email Address",
+              "fieldType": "email",
+              "fieldName": "email",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3fcc7b73-a2ce-4d2e-b5a9-1f8171a3bdca",
+      "name": "Resume Builder Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        112
+      ],
+      "webhookId": "85ebeabf-8968-41bc-b072-7ab9c2038cee"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Generate Resume JSON": {
+      "main": [
+        [
+          {
+            "node": "Build HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Generate Resume JSON",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build HTML": {
+      "main": [
+        [
+          {
+            "node": "Convert to PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to PDF": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resume Builder Form": {
+      "main": [
+        [
+          {
+            "node": "Generate Resume JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "d6ba8604-78f0-41c1-adfa-ec47793a03da",
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp",
+    "templateCredsSetupCompleted": true,
+    "instanceId": "781edc5626edfcf4cf101bda2de733781e606f62e76e242e9c0bac27c2240e88"
+  },
+  "nodeGroups": [],
+  "id": "K5SuMIuXwMYBzs7K",
+  "tags": []
+}
